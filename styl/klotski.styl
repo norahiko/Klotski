@@ -1,0 +1,33 @@
+body
+    margin: 0px
+
+#view
+    value = 10
+    padding: (- value)
+    position: relative
+
+.cell
+    border-width = 2px
+    border-shadow = rgba(0, 0, 0, 0.2)
+    border-light = rgba(255, 255, 255, 0.2)
+
+    position: absolute
+    box-sizing: border-box
+    -moz-box-sizing: border-box
+    cursor: pointer
+
+    &.edge-top
+        border-top: border-width solid border-light
+
+    &.edge-right
+        border-right: border-width solid border-shadow
+
+    &.edge-bottom
+        border-bottom: border-width solid border-shadow
+
+    &.edge-left
+        border-left: border-width solid border-light
+
+    &.wall
+        cursor: default
+
