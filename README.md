@@ -2,6 +2,11 @@
 
 Classic puzzle game
 
+## Demo
+
+* http://jsdo.it/norahiko/6ap9
+* http://jsdo.it/norahiko/6mfF
+* http://jsdo.it/norahiko/46S1
 
 ## How to play
 
