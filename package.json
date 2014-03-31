@@ -1,24 +1,21 @@
 {
   "name": "klotski",
   "version": "0.0.0",
-  "description": "A sliding block puzzle",
+  "description": "A classic block puzzle",
   "main": "index.js",
   "devDependencies": {
-    "chai": "~1.9.0",
-    "sinon": "~1.8.2",
     "gulp": "~3.5.2",
-    "gulp-concat": "~2.1.7",
     "gulp-stylus": "~0.0.13",
     "gulp-tsc": "~0.2.2",
     "typescript": "~0.9.5"
   },
   "scripts": {
-    "test": "testem"
+    "install": "gulp build"
   },
   "keywords": [
     "klotski",
-    "block",
     "puzzle",
+    "game",
     "WebApplication"
   ],
   "author": "norahiko",

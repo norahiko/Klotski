@@ -4,14 +4,16 @@
     <meta charset="UTF-8">
     <title></title>
     <link rel="stylesheet" href="css/klotski.css">
-
-    <meta name="viewport" content="width=320px, user-scalable=no">
+    <meta name="viewport" content="width=device-width">
 </head>
 <body>
-    <div id="board"></div>
-    <div id="view"></div>
-
-
+    <div class="klotski">
+        <div class='klotski-ui'>
+            <span id="drag-counter">0</span>
+            <input id="reset-button" value="Reset" type="button">
+        </div>
+        <canvas id="view"></canvas>
+    </div>
 
     <script src="js/config.js" type="text/javascript" charset="utf-8"></script>
     <script src="js/helper.js" type="text/javascript" charset="utf-8"></script>

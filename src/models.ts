@@ -1,266 +1,304 @@
-interface Point {
+class Block {
+    // 予約済みのブロックタイプ
+    static emptyType = ' ';
+    static wallType = '#';
+    // ブロックのタイプ。タイプが同じブロックはドラッグされると揃って動く
+    type: string;
+    // 初期配置の位置
+    col: number;
+    row: number;
+    // ブロックの現在位置(px) Canvas要素からの相対座標
     y: number;
     x: number;
+    borderLeft: boolean;
+    borderTop: boolean;
+    borderRight: boolean;
+    borderBottom: boolean;
+
+    constructor(type: string, col: number, row: number, x: number, y: number) {
+        this.type = type;
+        this.col = col;
+        this.row = row;
+        this.x = x;
+        this.y = y;
+        this.borderLeft = false;
+        this.borderTop = false;
+        this.borderRight = false;
+        this.borderBottom = false;
+    }
 }
 
-interface CellImages {
-    background: string;
-    '#': string;
-}
 
-interface BoardEventHandler {
-    dragStart(cellType: string): void;
-    drag(diff: Point): void;
-    dragEnd(): void;
-}
-
-class Klotski implements BoardEventHandler {
-    board: Board;
-    map: string[][];
-    originalMap: string[][];
-    goal: string[][];
+class Board {
+    // 横のブロックの数
+    columns: number;
+    // 縦のブロックの数
+    rows: number;
+    // ブロックの辺の長さ(px)
+    blockSize: number;
+    // 初期配置
+    board: string[][];
+    // stopped が trueの時は操作を受け付けない
+    stopped: boolean;
+    //ブロックを移動した回数
     dragCounter: number;
-    running: boolean;
 
-    cellSize: number;
-    width: number;
-    height: number;
+    view: BoardView;
+    // 板上のwallも含む全てのブロックの配列
+    blocks: Block[];
+    // タイプでグルーピングされたブロックの配列
+    pieces: { [type: string]: Block[] };
+    // マウスのクリックが押された状態では常にtrue
     dragging: boolean;
-    piece: Piece;
+    // ドラッグ中のブロックの配列
+    draggingBlocks: Block[];
+    // ドラッグ中カーソルが移動した距離からブロックが移動した距離を引いた数
+    draggedX: number;
+    draggedY: number;
+
+    // ドラッグしてもブロックが移動しなかった（元の場所に戻った)かどうか
+    // 調べるため、ドラッグ開始時のブロックの座標を記録する
+    dragStartX: number;
+    dragStartY: number;
+
+    // ブロックが前のフレームで移動していたときはtrue
+    moving: boolean;
+    // Boardオブジェクトにバインドされた_moveThreadメソッド
+    // 非同期でブロック同士の当たり判定や移動を行う
     moveThread: (time: number) => void;
-
-    hooks = {
-        dragged: function() {},
-        goaled: function() {},
-    };
+    // ブロックがドラッグされるたびに呼ばれるフックメソッド
+    // ドラッグされても移動しなかった場合は呼ばれない
+    draggedHook = function() {};
 
 
-    constructor(board: Board, map: string[][], goal: string[][]) {
-        this.board = board;
-        this.originalMap = map;
-        this.goal = goal;
+    constructor(blockSize: number, board: string[]) {
+        this.blockSize = blockSize;
+        this.board = board.map(row => row.split(""));
+        this.columns = this.board[0].length;
+        this.rows = this.board.length;
+
+        this.stopped = false;
+        this.draggedX = 0;
+        this.draggedY = 0;
+        this.draggingBlocks = null;
         this.dragCounter = 0;
-        this.running = true;
-
-        this.cellSize = board.cellSize;
-        this.width = map[0].length;
-        this.height = map.length;
-        this.dragging = false;
-        this.piece = new Piece(this.cellSize, this.width, this.height);
-        this.resetMap();
         this.moveThread = (time: number) => this._moveThread(time);
 
-        if(this.cellSize % config.cellMovingDistanceUnit !== 0) {
-            throw new Error('cellSizeはconfig.cellMovingDistanceUnitの倍数でなければいけない');
-        }
-        helper.validateMapSize(map);
-        helper.validateMapSize(goal);
-        if(map.length !== goal.length || map[0].length !== goal[0].length) {
-            throw new Error('開始マップとゴールマップのサイズが等しくない');
-        }
+        this.validate();
+        this.initBlocks();
     }
 
-    public resetMap() {
-        this.map = helper.copy(this.originalMap);
+    // ブロックの位置を初期配置に戻す
+    public reset() {
+        this.stopped = false;
+        this.dragCounter = 0;
+        this.blocks.forEach(block => {
+            block.x = block.col * this.blockSize;
+            block.y = block.row * this.blockSize;
+        });
     }
 
-    public dragStart(cellType: string) {
-        if(this.dragging || ! this.running) { return; }
-        if(this.piece.isMoving()) {
-            this.board.moveElements(this.piece.type, this.piece.dragged);
-            this.piece.fixCellPoints();
+    // goal上にあるブロックがthis上と同じ位置にあるか
+    public checkGoal(goal: Board): boolean {
+        return goal.blocks.every(gc => this.blocks.some(c => {
+            return gc.type === c.type && gc.x === c.x && gc.y === c.y
+        }));
+    }
+
+    public isDraggableBlock(x: number, y: number): boolean {
+        var type = this.getBlockType(x, y);
+        return type !== Block.emptyType && type !== Block.wallType;
+    }
+
+    // イベントハンドラ
+    public onDragStart(x: number, y: number) {
+        if(this.stopped) { return; }
+        var type = this.getBlockType(x, y);
+        if(this.draggedX !== 0 || this.draggedY !== 0) {
+            this.moveBlocks(this.draggedX, this.draggedY)
+            this.afterDrag();
         }
+
+        this.draggingBlocks = this.pieces[type];
         this.dragging = true;
-        this.takePiece(cellType);
-        helper.requestAnimationFrame(this.moveThread);
+        this.moving = false;
+        this.draggedX = 0;
+        this.draggedY = 0;
+        this.dragStartX = this.draggingBlocks[0].x;
+        this.dragStartY = this.draggingBlocks[0].y;
     }
 
-    public drag(diff: Point) {
-        if(this.dragging === false) { return; }
-        this.piece.changeDraggedDistance(diff);
-    }
-
-    public dragEnd() {
-        if(this.dragging === false) { return; }
-        this.dragging = false;
-        this.putPiece();
-        if(this.piece.hasMoved()) {
-            this.dragCounter += 1;
-            this.hooks.dragged();
-            if(this.checkGoal()) {
-                this.hooks.goaled();
-            }
-        }
-    }
-
-    public checkGoal(): boolean {
-        for(var row = 0; row < this.height; row++) {
-            for(var col = 0; col < this.width; col++) {
-                var cell = this.map[row][col];
-                var gcell = this.goal[row][col];
-                if(cell !== gcell && gcell !== helper.emptyCell) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    public takePiece(cellType: string) {
-        var cellPoints = [];
-        for(var row = 0; row < this.height; row++) {
-            for(var col = 0; col < this.width; col++) {
-                if(this.map[row][col] === cellType) {
-                    this.map[row][col] = helper.emptyCell;
-                    cellPoints.push({ y: row * this.cellSize, x: col * this.cellSize });
-                }
-            }
-        }
-        this.piece.dragStart(this.map, cellType, cellPoints);
-    }
-
-    public putPiece() {
-        this.piece.snap(this.map);
-    }
-
-    public _moveThread(_: number) {
-        if(this.dragging || this.piece.isMoving()) {
-            var moved = this.piece.move();
-            if(moved.y || moved.x) {
-                this.board.moveElements(this.piece.type, moved);
-            }
+    // イベントハンドラ
+    public onDrag(x: number, y: number) {
+        if(this.stopped) { return; }
+        this.draggedX += x;
+        this.draggedY += y;
+        if(this.moving === false) {
+            this.moving = true;
             helper.requestAnimationFrame(this.moveThread);
         }
     }
-}
 
-
-class Piece {
-    cells: Point[];
-    size: number;
-    map: string[][];
-    type: string;
-    mapHeight: number;
-    mapWidth: number;
-    dragged: Point;
-    dragStartPoint: Point;
-
-    constructor(size: number, width: number, height: number) {
-        this.size = size;
-        this.dragged = { y: 0, x: 0 };
-        this.mapHeight = width;
-        this.mapWidth = height;
-    }
-
-    public dragStart(srcMap: string[][], type: string, cells: Point[]) {
-        this.map = helper.copy(srcMap);
-        this.type = type;
-        this.cells = cells;
-        this.dragged.y = 0;
-        this.dragged.x = 0;
-        this.dragStartPoint = { y: cells[0].y, x: cells[0].x };
-    }
-
-    public isMoving(): boolean {
-        return this.dragged.x !== 0 || this.dragged.y !== 0;
-    }
-
-    public snap(srcMap: string[][]) {
-        var p = this.cells[0];
-        var half = this.size / 2;
-        var modY = p.y % this.size;
-        var modX = p.x % this.size;
-        var snapY = modY < half ? -modY : this.size - modY;
-        var snapX = modX < half ? -modX : this.size - modX;
-        this.dragged.y = snapY;
-        this.dragged.x = snapX;
-
-        this.cells.forEach(cell => {
-            var row = (cell.y + snapY) / this.size;
-            var col = (cell.x + snapX) / this.size;
-            srcMap[row][col] = this.type;
-        });
-    }
-
-    public fixCellPoints() {
-        this.cells.forEach(cell => {
-            cell.y = this.dragged.y;
-            cell.x = this.dragged.x;
-        });
-        this.dragged.y = 0;
-        this.dragged.x = 0;
-    }
-
-    public hasMoved(): boolean {
-        return this.dragStartPoint.y !== this.cells[0].y + this.dragged.y ||
-               this.dragStartPoint.x !== this.cells[0].x + this.dragged.x;
-    }
-
-    public changeDraggedDistance(diff: Point) {
-        this.dragged.y += diff.y;
-        this.dragged.x += diff.x;
-    }
-
-    public move(): Point {
-        var moved = this.calcMoveSize();
-        this.cells.forEach(cell => {
-            cell.x += moved.x;
-            cell.y += moved.y;
-        });
-        this.dragged.y -= moved.y;
-        this.dragged.x -= moved.x;
-        return { y: moved.y, x: moved.x };
-    }
-
-    public calcMoveSize(): Point {
-        var dragged = this.dragged;
-        var unit = config.cellMovingDistanceUnit;
-        var signY = dragged.y < 0 ? -1 : 1;
-        var signX = dragged.x < 0 ? -1 : 1;
-        var maxY = Math.min(Math.abs(dragged.y), this.size);
-        var maxX = Math.min(Math.abs(dragged.x), this.size);
-        var lessMax = Math.min(maxY, maxX);
-
-        var y = 0;
-        while(y + unit <= maxY) {
-            if( ! this.isMovable((y + unit) * signY, 0)) { break; }
-            y += unit;
+    // イベントハンドラ
+    public onDragEnd() {
+        if(this.stopped) { return; }
+        this.snap();
+        this.dragging = false;
+        if(this.moving === false) {
+            helper.requestAnimationFrame(this.moveThread);
         }
-        var x = 0;
+    }
+
+    private validate() {
+        if(this.board.some(row => row.length !== this.columns)) {
+            throw new Error('マップの横幅が揃っていない');
+        }
+        if(this.blockSize % config.blockMovingDistanceUnit !== 0) {
+            throw new Error('blockSizeはconfig.blockMovingDistanceUnitの倍数でなければいけない');
+        }
+    }
+
+    private initBlocks() {
+        this.blocks = [];
+        this.pieces = {};
+        for(var row = 0; row < this.rows; row++) {
+            for(var col = 0; col < this.columns; col++) {
+                this.addBlock(this.board[row][col], col, row);
+            }
+        }
+    }
+
+    private addBlock(type: string, col: number, row: number) {
+        if(type === Block.emptyType) { return; }
+        var block = new Block(type, col, row, col * this.blockSize, row * this.blockSize);
+        this.blocks.push(block);
+        this.setBorder(block, col, row);
+        if(this.pieces[type] === undefined) {
+            this.pieces[type] = [];
+        }
+        this.pieces[type].push(block);
+    }
+
+    private getBlockType(x: number, y: number): string {
+        for(var i = 0; i < this.blocks.length; i++) {
+            var block = this.blocks[i];
+            if(block.x <= x && x <= block.x + this.blockSize &&
+               block.y <= y && y <= block.y + this.blockSize) {
+                return block.type;
+            }
+        }
+        return Block.emptyType;
+    }
+
+    private isIn(col: number, row: number): boolean {
+        return 0   <= col &&
+               0   <= row &&
+               col <  this.columns &&
+               row <  this.rows;
+    }
+
+    private setBorder(block: Block, col: number, row: number) {
+        if( ! this.isSameType(block, col, row-1)) block.borderTop = true;
+        if( ! this.isSameType(block, col, row+1)) block.borderBottom = true;
+        if( ! this.isSameType(block, col-1, row)) block.borderLeft = true;
+        if( ! this.isSameType(block, col+1, row)) block.borderRight = true;
+    }
+
+    private isSameType(block: Block, col: number, row: number): boolean {
+        return this.isIn(col, row) && this.board[row][col] === block.type;
+    }
+
+    private afterDrag() {
+        if(this.dragStartX !== this.draggingBlocks[0].x ||
+           this.dragStartY !== this.draggingBlocks[0].y) {
+              this.dragCounter++;
+              this.draggedHook();
+        }
+    }
+
+    private moveBlocks(x: number, y: number) {
+        for(var i = 0; i < this.draggingBlocks.length; i++) {
+            this.draggingBlocks[i].x += x;
+            this.draggingBlocks[i].y += y;
+        }
+    }
+
+    // ブロックをグリッドに沿った位置に配置する
+    private snap() {
+        var block = this.draggingBlocks[0];
+        var half = this.blockSize / 2;
+        var diffX = block.x % this.blockSize;
+        var diffY = block.y % this.blockSize;
+        this.draggedX = diffX < half ? -diffX : this.blockSize - diffX;
+        this.draggedY = diffY < half ? -diffY : this.blockSize - diffY;
+    }
+
+    private _moveThread(_: number) {
+        var moveDist = this.calcMoveDist();
+        if(moveDist.x === 0 && moveDist.y === 0) {
+            this.moving = false;
+            if(this.dragging === false) {
+                this.afterDrag();
+            }
+            return;
+        }
+        this.draggedX -= moveDist.x;
+        this.draggedY -= moveDist.y;
+        this.moveBlocks(moveDist.x, moveDist.y);
+        this.view.draw(this);
+        helper.requestAnimationFrame(this.moveThread);
+    }
+
+    private calcMoveDist(): { x: number; y: number; } {
+        var unit = config.blockMovingDistanceUnit;
+        var signX = this.draggedX < 0 ? -1 : 1;
+        var signY = this.draggedY < 0 ? -1 : 1;
+        var maxY = Math.min(Math.abs(this.draggedY), config.blockMovingMaxSpeed);
+        var maxX = Math.min(Math.abs(this.draggedX), config.blockMovingMaxSpeed);
+        var minMax = Math.min(maxX, maxY);
+
+        var xy = 0;
+        while(xy + unit <= minMax) {
+            if( ! this.isMovable((xy+unit)*signX, (xy+unit)*signY)) { break; }
+            xy += unit;
+        }
+
+        var x = xy;
+        var y = xy;
         while(x + unit <= maxX) {
-            if( ! this.isMovable(y * signY, (x + unit) * signX)) { break; }
+            if( ! this.isMovable((x+unit)*signX, y*signY)) { break; }
             x += unit;
         }
-        return { y: y * signY, x: x * signX };
+        while(y + unit <= maxY) {
+            if( ! this.isMovable(x*signX, (y+unit)*signY)) { break; }
+            y += unit;
+        }
+        return { x: x * signX, y: y * signY };
+
     }
 
-    public isMovable(dy: number, dx: number): boolean {
-        var size = this.size;
-        var mapWidth = this.mapWidth;
-        var mapHeight = this.mapHeight;
-        var map = this.map;
+    private isMovable(dx: number, dy: number): boolean {
+        var size = this.blockSize;
+        var width = size * this.columns;
+        var height = size * this.rows;
 
-        for(var i = 0; i < this.cells.length; i++) {
-            var cell = this.cells[i];
-            var ay = cell.y + dy;
-            var ax = cell.x + dx;
-            var by = ay + size;
-            var bx = ax + size;
+        for(var i = 0; i < this.draggingBlocks.length; i++) {
+            var block = this.draggingBlocks[i];
+            var x = block.x + dx;
+            var y = block.y + dy;
 
-            if(ax < 0 || ay < 0 || mapWidth * size < bx || mapHeight * size < by) {
+            if(x < 0 || y < 0 || width < x + size || height < y + size) {
                 return false;
             }
 
-            for(var row = 0; row < mapHeight; row++) {
-                for(var col = 0; col < mapWidth; col++) {
-                    if(map[row][col] === helper.emptyCell) { continue; }
-                    var my = row * size;
-                    var mx = col * size;
-                    var ny = my + size;
-                    var nx = mx + size;
-                    if(ax < nx && mx < bx && ay < ny && my < by) {
-                        return false;
-                    }
+            for(var k = 0; k < this.blocks.length; k++) {
+                var another = this.blocks[k];
+                if(block.type === another.type) { continue; }
+                if(x < another.x + size &&
+                   another.x < x + size &&
+                   y < another.y + size &&
+                   another.y < y + size) {
+                    return false;
                 }
             }
         }
